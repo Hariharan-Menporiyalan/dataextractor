@@ -1,0 +1,14 @@
+[
+  {
+    "sourceDatabase": "IOT_STORE",
+    "tablesForChanges": [
+      {
+        "sourceSchema": "dbo",
+        "sourceTable": "IMS_NOI",
+        "primaryKey": ["NOIId"],
+        "targetSchema": "dbo",
+        "targetTable": "IMS_NOI_bronze"
+      }
+    ]
+  }
+]
