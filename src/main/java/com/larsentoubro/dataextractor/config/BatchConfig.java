@@ -18,8 +18,11 @@ import org.springframework.batch.item.ItemReader;
 import org.springframework.batch.item.ItemWriter;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.autoconfigure.batch.BatchDataSourceScriptDatabaseInitializer;
+import org.springframework.boot.autoconfigure.batch.BatchProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Scope;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -31,30 +34,41 @@ import java.util.Map;
 @Configuration
 public class BatchConfig {
 
-//    private final PlatformTransactionManager transactionManager;
+    private final DataSource targetDataSource;
 
-//    @Autowired
-//    public BatchConfig(@Qualifier("targetDataSource") DataSource batchDataSource) {
-//        this.transactionManager = new DataSourceTransactionManager(batchDataSource);
-//    }
-
-    @Bean
-    public PlatformTransactionManager transactionManager(@Qualifier("targetDataSource") DataSource dataSource) {
-        return new DataSourceTransactionManager(dataSource);
+    public BatchConfig(@Qualifier("targetDataSource") DataSource targetDataSource) {
+        this.targetDataSource = targetDataSource;
     }
 
     @Bean
-    public JobRepository jobRepository(@Qualifier("targetDataSource") DataSource batchDataSource, PlatformTransactionManager transactionManager) throws Exception {
+    @Scope("prototype")
+    public BatchDataSourceScriptDatabaseInitializer batchInitializer(
+            @Qualifier("targetDataSource") DataSource batchDataSource,
+            BatchProperties properties) {
+        return new BatchDataSourceScriptDatabaseInitializer(
+                batchDataSource,
+                properties.getJdbc()
+        );
+    }
+
+    @Bean
+    @Scope("prototype")
+    public PlatformTransactionManager transactionManager() {
+        return new DataSourceTransactionManager(targetDataSource);
+    }
+
+    @Bean
+    public JobRepository jobRepository(PlatformTransactionManager transactionManager) throws Exception {
         JobRepositoryFactoryBean factory = new JobRepositoryFactoryBean();
         factory.setDatabaseType("SQLSERVER");
-        factory.setDataSource(batchDataSource);
+        factory.setDataSource(targetDataSource);
         factory.setTransactionManager(transactionManager);
         factory.setIsolationLevelForCreate("ISOLATION_READ_COMMITTED");
         factory.afterPropertiesSet();
         return factory.getObject();
     }
 
-    @Bean
+    @Bean(name = "upsertJobLauncher")
     public JobLauncher jobLauncher(JobRepository jobRepository) {
         TaskExecutorJobLauncher jobLauncher = new TaskExecutorJobLauncher();
         jobLauncher.setJobRepository(jobRepository);
@@ -101,7 +115,7 @@ public class BatchConfig {
                 .build();
     }
 
-    @Bean
+    @Bean(name = "upsertJob")
     public Job upsertJob(JobRepository jobRepository, Step upsertStep) {
         return new JobBuilder("upsertJob", jobRepository)
                 .incrementer(new RunIdIncrementer())

@@ -1,13 +1,13 @@
 package com.larsentoubro.dataextractor.config;
 
+import com.zaxxer.hikari.HikariDataSource;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.boot.autoconfigure.batch.BatchDataSourceScriptDatabaseInitializer;
-import org.springframework.boot.autoconfigure.batch.BatchProperties;
 import org.springframework.boot.jdbc.DataSourceBuilder;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Primary;
+import org.springframework.context.annotation.Scope;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 import javax.sql.DataSource;
@@ -33,9 +33,10 @@ public class DataSourceConfig {
     public String targetPassword;
 
     @Bean(name = "sourceDataSource")
-    public DataSource sourceDataSource() {
+    @Scope("prototype")
+    public DataSource sourceDataSource(@Value("${spring.datasource.source.database:database=IOT_STORE;}") String sourceDatabase) {
         return DataSourceBuilder.create()
-                .url(sourceUrl)
+                .url(sourceUrl + sourceDatabase)
                 .username(sourceUsername)
                 .password(sourcePassword)
                 .build();
@@ -43,30 +44,28 @@ public class DataSourceConfig {
 
     @Primary
     @Bean(name = "targetDataSource")
-    public DataSource targetDataSource() {
-        return DataSourceBuilder.create()
-                .url(targetUrl)
-                .username(targetUsername)
-                .password(targetPassword)
-                .build();
+    @Scope("prototype") // Ensures a new instance is created dynamically
+    public DataSource targetDataSource(@Value("${spring.datasource.target.database:database=IOT_STORE_bronze;}") String targetDatabase) {
+        String fullUrl = targetUrl + targetDatabase;
+
+        HikariDataSource hikariDataSource = new HikariDataSource();
+        hikariDataSource.setJdbcUrl(fullUrl);
+        hikariDataSource.setUsername(targetUsername);
+        hikariDataSource.setPassword(targetPassword);
+        hikariDataSource.setDriverClassName("com.microsoft.sqlserver.jdbc.SQLServerDriver");
+
+        return hikariDataSource;
     }
 
-    @Bean
-    public BatchDataSourceScriptDatabaseInitializer batchInitializer(
-            @Qualifier("targetDataSource") DataSource batchDataSource,
-            BatchProperties properties) {
-        return new BatchDataSourceScriptDatabaseInitializer(
-                batchDataSource,
-                properties.getJdbc()
-        );
-    }
 
     @Bean(name = "sourceJdbcTemplate")
+    @Scope("prototype")
     public JdbcTemplate sourceJdbcTemplate(@Qualifier("sourceDataSource") DataSource dataSource) {
         return new JdbcTemplate(dataSource);
     }
 
     @Bean(name = "targetJdbcTemplate")
+    @Scope("prototype")
     public JdbcTemplate targetJdbcTemplate(@Qualifier("targetDataSource") DataSource dataSource) {
         return new JdbcTemplate(dataSource);
     }
