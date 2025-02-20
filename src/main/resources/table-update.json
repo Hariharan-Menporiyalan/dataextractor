@@ -5,9 +5,20 @@
       {
         "sourceSchema": "dbo",
         "sourceTable": "IMS_NOI",
-        "primaryKey": ["NOIId"],
+        "primaryKey": [
+          "NOIId"
+        ],
         "targetSchema": "dbo",
         "targetTable": "IMS_NOI_bronze"
+      },
+      {
+        "sourceSchema": "dbo",
+        "sourceTable": "BBS_AttendanceRound",
+        "primaryKey": [
+          "BBSRoundNo"
+        ],
+        "targetSchema": "dbo",
+        "targetTable": "BBS_AttendanceRound_bronze"
       }
     ]
   }

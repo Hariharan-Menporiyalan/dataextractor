@@ -29,6 +29,7 @@ import org.springframework.transaction.PlatformTransactionManager;
 
 import javax.sql.DataSource;
 import java.io.IOException;
+import java.util.List;
 import java.util.Map;
 
 @Configuration
@@ -79,22 +80,25 @@ public class BatchConfig {
     @StepScope
     public SourceTableItemReader itemReader(@Value("#{jobParameters['sourceSchema']}") String sourceSchema,
                                             @Value("#{jobParameters['sourceTable']}") String sourceTable,
+                                            @Value("#{jobParameters['primaryKeys']}") String primaryKeys,
                                             @Qualifier("sourceDataSource") DataSource dataSource) throws IOException {
-        return new SourceTableItemReader(sourceSchema, sourceTable, dataSource);
+        return new SourceTableItemReader(sourceSchema, sourceTable, primaryKeys, dataSource);
     }
 
     @Bean
     @StepScope
-    public DataChangeProcessor itemProcessor(@Value("#{jobParameters['targetSchema']}") String targetSchema,
-                                             @Value("#{jobParameters['targetTable']}") String targetTable,
-                                             @Value("#{jobParameters['primaryKeys']}") String primaryKeys,
-                                             @Qualifier("targetJdbcTemplate") JdbcTemplate jdbcTemplate) {
-        return new DataChangeProcessor(targetSchema, targetTable, primaryKeys, jdbcTemplate);
+    public ItemProcessor<Map<String, Object>, Map<String, Object>> dataChangeProcessor(
+            @Value("#{jobParameters['targetSchema']}") String targetSchema,
+            @Value("#{jobParameters['targetTable']}") String targetTable,
+            @Value("#{jobParameters['primaryKeys']}") String primaryKeysCsv,
+            @Qualifier("targetJdbcTemplate") JdbcTemplate jdbcTemplate) {
+
+        return new DataChangeProcessor(targetSchema, targetTable, primaryKeysCsv, jdbcTemplate);
     }
 
     @Bean
     @StepScope
-    public UpsertItemWriter itemWriter(@Value("#{jobParameters['targetSchema']}") String targetSchema,
+    public ItemWriter<Map<String, Object>> itemWriter(@Value("#{jobParameters['targetSchema']}") String targetSchema,
                                        @Value("#{jobParameters['targetTable']}") String targetTable,
                                        @Value("#{jobParameters['primaryKeys']}") String primaryKeys,
                                        @Qualifier("targetJdbcTemplate") JdbcTemplate jdbcTemplate) {
@@ -108,7 +112,7 @@ public class BatchConfig {
                            ItemProcessor<Map<String, Object>, Map<String, Object>> itemProcessor,
                            ItemWriter<Map<String, Object>> itemWriter) {
         return new StepBuilder("upsertStep", jobRepository)
-                .<Map<String, Object>, Map<String, Object>>chunk(100, transactionManager)
+                .<Map<String, Object>, Map<String, Object>>chunk(5000, transactionManager)
                 .reader(itemReader)
                 .processor(itemProcessor)
                 .writer(itemWriter)
@@ -123,4 +127,5 @@ public class BatchConfig {
                 .build();
     }
 }
+
 

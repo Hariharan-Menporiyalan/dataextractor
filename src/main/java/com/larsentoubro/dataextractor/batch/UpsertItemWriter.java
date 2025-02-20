@@ -1,8 +1,5 @@
 package com.larsentoubro.dataextractor.batch;
 
-import com.larsentoubro.dataextractor.jsondata.TableConfig;
-import com.larsentoubro.dataextractor.jsondata.TableMapping;
-import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.batch.core.configuration.annotation.StepScope;
 import org.springframework.batch.item.Chunk;
@@ -13,13 +10,17 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 @Slf4j
 @Component
 @StepScope
 public class UpsertItemWriter implements ItemWriter<Map<String, Object>> {
+
     private final JdbcTemplate jdbcTemplate;
     private final String targetSchema;
     private final String targetTable;
@@ -28,58 +29,40 @@ public class UpsertItemWriter implements ItemWriter<Map<String, Object>> {
     @Autowired
     public UpsertItemWriter(@Value("#{jobParameters['targetSchema']}") String targetSchema,
                             @Value("#{jobParameters['targetTable']}") String targetTable,
-                            @Value("#{jobParameters['primaryKeys']}") String primaryKeys,
+                            @Value("#{jobParameters['primaryKeys']}") String primaryKeysCsv,
                             @Qualifier("targetJdbcTemplate") JdbcTemplate jdbcTemplate) {
         this.jdbcTemplate = jdbcTemplate;
         this.targetSchema = targetSchema;
         this.targetTable = targetTable;
-        this.primaryKeys = Arrays.asList(primaryKeys.split(","));
+        this.primaryKeys = Arrays.asList(primaryKeysCsv.split(","));
     }
 
     @Override
     public void write(Chunk<? extends Map<String, Object>> items) {
         if (items.isEmpty()) return;
 
-        for (Map<String, Object> item : items) {
-            String mergeQuery = buildMergeQuery(item);
-            jdbcTemplate.update(mergeQuery, item.values().toArray());
-        }
+        List<Map<String, Object>> batch = new ArrayList<>(items.getItems());
+
+        String sql = buildMergeQuery(batch);
+        jdbcTemplate.batchUpdate(sql, batch.stream()
+                .map(item -> item.values().toArray())
+                .toList());
     }
 
-    private String buildMergeQuery(Map<String, Object> item) {
+    private String buildMergeQuery(List<Map<String, Object>> batch) {
         String fullTableName = targetSchema + "." + targetTable;
+        List<String> columns = new ArrayList<>(batch.get(0).keySet());
+        List<String> nonPrimaryColumns = columns.stream().filter(col -> !primaryKeys.contains(col)).toList();
 
-        // Columns for insert/update
-        List<String> columns = new ArrayList<>(item.keySet());
-        List<String> nonPrimaryColumns = columns.stream()
-                .filter(col -> !primaryKeys.contains(col))
-                .toList();
+        String matchCondition = primaryKeys.stream().map(pk -> "t." + pk + " = s." + pk).collect(Collectors.joining(" AND "));
+        String updateSetClause = nonPrimaryColumns.stream().map(col -> "t." + col + " = s." + col).collect(Collectors.joining(", "));
 
-        // Primary key condition for matching
-        String matchCondition = primaryKeys.stream()
-                .map(pk -> "target." + pk + " = source." + pk)
-                .collect(Collectors.joining(" AND "));
-
-        // Update clause: Only non-primary keys should be updated
-        String updateSetClause = nonPrimaryColumns.stream()
-                .map(col -> "target." + col + " = source." + col)
-                .collect(Collectors.joining(", "));
-
-        // Column list for insert
-        String columnList = String.join(", ", columns);
-        String valueList = columns.stream()
-                .map(col -> "source." + col)
-                .collect(Collectors.joining(", "));
-
-        return  "SET IDENTITY_INSERT " + targetSchema + "." + targetTable + " ON;" +
-                "MERGE INTO " + fullTableName + " AS target " +
-                "USING (SELECT ? AS " + String.join(", ? AS ", columns) + ") AS source " +
+        return "SET IDENTITY_INSERT " + targetSchema + "." + targetTable + " ON;" +
+                "MERGE INTO " + fullTableName + " AS t " +
+                "USING (SELECT ? AS " + String.join(", ? AS ", columns) + ") AS s " +
                 "ON " + matchCondition + " " +
-                "WHEN MATCHED THEN " +
-                "UPDATE SET " + updateSetClause + " " +
-                "WHEN NOT MATCHED THEN " +
-                "INSERT (" + columnList + ") " +
-                "VALUES (" + valueList + ");" +
+                "WHEN MATCHED THEN UPDATE SET " + updateSetClause + " " +
+                "WHEN NOT MATCHED THEN INSERT (" + String.join(", ", columns) + ") VALUES (" + columns.stream().map(c -> "s." + c).collect(Collectors.joining(", ")) + ");"+
                 "SET IDENTITY_INSERT " + targetSchema + "." + targetTable + " OFF;";
     }
 }

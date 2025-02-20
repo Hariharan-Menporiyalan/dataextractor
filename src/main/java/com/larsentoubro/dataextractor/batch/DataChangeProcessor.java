@@ -12,65 +12,71 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
 @Slf4j
 @Component
 @StepScope
 public class DataChangeProcessor implements ItemProcessor<Map<String, Object>, Map<String, Object>> {
+
     private final JdbcTemplate jdbcTemplate;
     private final String targetSchema;
     private final String targetTable;
     private final List<String> primaryKeys;
-    private static final Set<Map<String, Object>> processedPrimaryKeys = Collections.synchronizedSet(new HashSet<>());
+    private final Set<Map<String, Object>> processedPrimaryKeys = ConcurrentHashMap.newKeySet();
 
     @Autowired
     public DataChangeProcessor(@Value("#{jobParameters['targetSchema']}") String targetSchema,
                                @Value("#{jobParameters['targetTable']}") String targetTable,
-                               @Value("#{jobParameters['primaryKeys']}") String primaryKeys,
+                               @Value("#{jobParameters['primaryKeys']}") String primaryKeysCsv,
                                @Qualifier("targetJdbcTemplate") JdbcTemplate jdbcTemplate) {
         this.jdbcTemplate = jdbcTemplate;
         this.targetSchema = targetSchema;
         this.targetTable = targetTable;
-        this.primaryKeys = Arrays.asList(primaryKeys.split(","));
+        this.primaryKeys = Arrays.asList(primaryKeysCsv.split(","));
     }
 
     @Override
     public Map<String, Object> process(Map<String, Object> item) {
-        //Construct the WHERE clause for primary keys
+        if (item == null || item.isEmpty()) return null;
+
+        // Extract primary key values for lookup
+        Map<String, Object> primaryKeyMap = primaryKeys.stream()
+                .collect(Collectors.toMap(pk -> pk, item::get));
+
+        processedPrimaryKeys.add(primaryKeyMap); // Store primary keys for cleanup
+
+        // Build WHERE condition for primary keys
         String whereClause = primaryKeys.stream()
                 .map(pk -> pk + " = ?")
                 .collect(Collectors.joining(" AND "));
 
         String sql = "SELECT * FROM " + targetSchema + "." + targetTable + " WHERE " + whereClause;
-        List<Map<String, Object>> existingRecords = jdbcTemplate.queryForList(sql, primaryKeys.stream().map(item::get).toArray());
 
-        //Store processed primary keys for later deletion check
-        Map<String, Object> primaryKeyMap = primaryKeys.stream()
-                .collect(Collectors.toMap(pk -> pk, item::get));
-        processedPrimaryKeys.add(primaryKeyMap);
+        // Fetch target record
+        List<Map<String, Object>> targetRecords = jdbcTemplate.queryForList(sql, primaryKeys.stream()
+                .map(item::get)
+                .toArray());
 
-        //If no record exists in the target, insert the record
-        if (existingRecords.isEmpty()) {
+        if (targetRecords.isEmpty()) {
+            // No record exists in target → Insert
             return item;
         }
 
-        //Compare values (excluding primary keys)
-        Map<String, Object> existingRecord = existingRecords.get(0);
-        boolean hasChanges = existingRecord.entrySet().stream()
-                .anyMatch(entry -> {
-                    String column = entry.getKey();
-                    if (primaryKeys.contains(column)) {
-                        return false; // Skip primary keys comparison
-                    }
-                    return !Objects.equals(entry.getValue(), item.get(column));
-                });
-
-        if (hasChanges) {
-            return item; // Return for upsert (update)
+        // Compare existing record with new record
+        Map<String, Object> existingRecord = targetRecords.get(0);
+        if (hasChanges(existingRecord, item)) {
+            return item; // Needs update
         }
 
-        return null; // No change, no need to upsert
+        return null; // No changes, skip this item
+    }
+
+    private boolean hasChanges(Map<String, Object> existingRecord, Map<String, Object> newRecord) {
+        return newRecord.entrySet().stream()
+                .filter(entry -> !primaryKeys.contains(entry.getKey())) // Ignore primary keys
+                .anyMatch(entry -> !Objects.equals(entry.getValue(), existingRecord.get(entry.getKey())));
     }
 
     @AfterStep
@@ -84,17 +90,13 @@ public class DataChangeProcessor implements ItemProcessor<Map<String, Object>, M
                     .collect(Collectors.toMap(pk -> pk, targetRecord::get));
 
             if (!processedPrimaryKeys.contains(primaryKeyMap)) {
-                // Record exists in target but not in source, DELETE IT
-                String whereClause = primaryKeys.stream()
-                        .map(pk -> pk + " = ?")
-                        .collect(Collectors.joining(" AND "));
+                // DELETE records that exist in target but not in source
+                String deleteSql = "DELETE FROM " + targetSchema + "." + targetTable + " WHERE " +
+                        primaryKeys.stream().map(pk -> pk + " = ?").collect(Collectors.joining(" AND "));
 
-                String deleteSql = "DELETE FROM " + targetSchema + "." + targetTable + " WHERE " + whereClause;
                 jdbcTemplate.update(deleteSql, primaryKeys.stream().map(targetRecord::get).toArray());
-
-                log.info("Deleted record from {}.{} where {}", targetSchema, targetTable, whereClause);
+                log.info("Deleted record from {}.{} where {}", targetSchema, targetTable, primaryKeyMap);
             }
         }
     }
 }
-
