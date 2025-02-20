@@ -42,8 +42,8 @@ public class UpsertItemWriter implements ItemWriter<Map<String, Object>> {
         if (items.isEmpty()) return;
 
         List<Map<String, Object>> batch = new ArrayList<>(items.getItems());
-
         String sql = buildMergeQuery(batch);
+
         jdbcTemplate.batchUpdate(sql, batch.stream()
                 .map(item -> item.values().toArray())
                 .toList());
@@ -57,12 +57,13 @@ public class UpsertItemWriter implements ItemWriter<Map<String, Object>> {
         String matchCondition = primaryKeys.stream().map(pk -> "t." + pk + " = s." + pk).collect(Collectors.joining(" AND "));
         String updateSetClause = nonPrimaryColumns.stream().map(col -> "t." + col + " = s." + col).collect(Collectors.joining(", "));
 
-        return "SET IDENTITY_INSERT " + targetSchema + "." + targetTable + " ON;" +
+        return  "SET IDENTITY_INSERT " + targetSchema + "." + targetTable + " ON;" +
                 "MERGE INTO " + fullTableName + " AS t " +
                 "USING (SELECT ? AS " + String.join(", ? AS ", columns) + ") AS s " +
                 "ON " + matchCondition + " " +
                 "WHEN MATCHED THEN UPDATE SET " + updateSetClause + " " +
-                "WHEN NOT MATCHED THEN INSERT (" + String.join(", ", columns) + ") VALUES (" + columns.stream().map(c -> "s." + c).collect(Collectors.joining(", ")) + ");"+
+                "WHEN NOT MATCHED THEN INSERT (" + String.join(", ", columns) + ") VALUES (" +
+                columns.stream().map(c -> "s." + c).collect(Collectors.joining(", ")) + ");" +
                 "SET IDENTITY_INSERT " + targetSchema + "." + targetTable + " OFF;";
     }
 }

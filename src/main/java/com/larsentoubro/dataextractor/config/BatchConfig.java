@@ -23,8 +23,10 @@ import org.springframework.boot.autoconfigure.batch.BatchProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Scope;
+import org.springframework.core.task.TaskExecutor;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.transaction.PlatformTransactionManager;
 
 import javax.sql.DataSource;
@@ -40,6 +42,17 @@ public class BatchConfig {
     public BatchConfig(@Qualifier("targetDataSource") DataSource targetDataSource) {
         this.targetDataSource = targetDataSource;
     }
+
+    @Bean
+    public TaskExecutor taskExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(4); // Number of parallel threads
+        executor.setMaxPoolSize(8);
+        executor.setQueueCapacity(10);
+        executor.initialize();
+        return executor;
+    }
+
 
     @Bean
     @Scope("prototype")
@@ -87,18 +100,17 @@ public class BatchConfig {
 
     @Bean
     @StepScope
-    public ItemProcessor<Map<String, Object>, Map<String, Object>> dataChangeProcessor(
+    public DataChangeProcessor dataChangeProcessor(
             @Value("#{jobParameters['targetSchema']}") String targetSchema,
             @Value("#{jobParameters['targetTable']}") String targetTable,
             @Value("#{jobParameters['primaryKeys']}") String primaryKeysCsv,
             @Qualifier("targetJdbcTemplate") JdbcTemplate jdbcTemplate) {
-
         return new DataChangeProcessor(targetSchema, targetTable, primaryKeysCsv, jdbcTemplate);
     }
 
     @Bean
     @StepScope
-    public ItemWriter<Map<String, Object>> itemWriter(@Value("#{jobParameters['targetSchema']}") String targetSchema,
+    public UpsertItemWriter itemWriter(@Value("#{jobParameters['targetSchema']}") String targetSchema,
                                        @Value("#{jobParameters['targetTable']}") String targetTable,
                                        @Value("#{jobParameters['primaryKeys']}") String primaryKeys,
                                        @Qualifier("targetJdbcTemplate") JdbcTemplate jdbcTemplate) {
@@ -110,12 +122,14 @@ public class BatchConfig {
                            PlatformTransactionManager transactionManager,
                            ItemReader<Map<String, Object>> itemReader,
                            ItemProcessor<Map<String, Object>, Map<String, Object>> itemProcessor,
-                           ItemWriter<Map<String, Object>> itemWriter) {
+                           ItemWriter<Map<String, Object>> itemWriter,
+                           TaskExecutor taskExecutor) {
         return new StepBuilder("upsertStep", jobRepository)
                 .<Map<String, Object>, Map<String, Object>>chunk(5000, transactionManager)
                 .reader(itemReader)
                 .processor(itemProcessor)
                 .writer(itemWriter)
+                .taskExecutor(taskExecutor)
                 .build();
     }
 
