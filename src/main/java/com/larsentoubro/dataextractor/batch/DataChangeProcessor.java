@@ -1,5 +1,6 @@
 package com.larsentoubro.dataextractor.batch;
 
+import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.batch.core.StepExecution;
 import org.springframework.batch.core.annotation.AfterStep;
@@ -24,6 +25,7 @@ public class DataChangeProcessor implements ItemProcessor<Map<String, Object>, M
     private final String targetSchema;
     private final String targetTable;
     private final List<String> primaryKeys;
+    private Set<Map<String, Object>> targetRecords;
     private final Set<Map<String, Object>> processedPrimaryKeys = ConcurrentHashMap.newKeySet();
 
     @Autowired
@@ -37,59 +39,74 @@ public class DataChangeProcessor implements ItemProcessor<Map<String, Object>, M
         this.primaryKeys = Arrays.asList(primaryKeysCsv.split(","));
     }
 
+    @PostConstruct
+    public void loadTargetData() {
+        String selectAllSql = "SELECT * FROM " + targetSchema + "." + targetTable;
+        List<Map<String, Object>> records = jdbcTemplate.queryForList(selectAllSql);
+        log.info("Loaded target table data of size {} into memory...", records.size());
+
+        // Create a Map for fast lookups based on primary keys
+        targetRecords = new HashSet<>();
+        for (Map<String, Object> record : records) {
+            Map<String, Object> primaryKeyMap = primaryKeys.stream()
+                    .collect(Collectors.toMap(pk -> pk, record::get));
+            targetRecords.add(primaryKeyMap);
+        }
+    }
+
     @Override
     public Map<String, Object> process(Map<String, Object> item) {
-        if (item.isEmpty()) return null;
+        if (item == null || item.isEmpty()) return null;
 
-        // Extract primary key values
         Map<String, Object> primaryKeyMap = primaryKeys.stream()
                 .collect(Collectors.toMap(pk -> pk, item::get));
 
         processedPrimaryKeys.add(primaryKeyMap);
 
-        // Query the target table for existing records
-        String whereClause = primaryKeys.stream().map(pk -> pk + " = ?").collect(Collectors.joining(" AND "));
-        String sql = "SELECT * FROM " + targetSchema + "." + targetTable + " WHERE " + whereClause;
-        Object[] primaryKeyValues = primaryKeys.stream().map(item::get).toArray();
-        List<Map<String, Object>> targetRecords = jdbcTemplate.queryForList(sql, primaryKeyValues);
-
-        if (targetRecords.isEmpty()) {
-            return item;
+        if (targetRecords.contains(primaryKeyMap)) {
+            Map<String, Object> existingRecord = findRecord(primaryKeyMap);
+            if (existingRecord != null && hasChanges(existingRecord, item)) {
+                return item; // Update
+            } else {
+                return null; // No changes
+            }
+        } else {
+            return item; // Insert
         }
+    }
 
-        Map<String, Object> existingRecord = targetRecords.get(0);
-        if (hasChanges(existingRecord, item)) {
-            return item;
-        }
-
-        return null;
+    private Map<String, Object> findRecord(Map<String, Object> primaryKeyMap) {
+        return targetRecords.stream()
+                .filter(record -> primaryKeys.stream().allMatch(pk -> Objects.equals(record.get(pk), primaryKeyMap.get(pk))))
+                .findFirst()
+                .orElse(null);
     }
 
     private boolean hasChanges(Map<String, Object> existingRecord, Map<String, Object> newRecord) {
         return newRecord.entrySet().stream()
-                .filter(entry -> !primaryKeys.contains(entry.getKey())) // Exclude primary keys
+                .filter(entry -> !primaryKeys.contains(entry.getKey()))
                 .anyMatch(entry -> !Objects.equals(entry.getValue(), existingRecord.get(entry.getKey())));
     }
 
     @AfterStep
     public void cleanup(StepExecution stepExecution) {
-        log.info("Performing cleanup to remove deleted records...");
+        log.info("Performing cleanup: Deletes...");
 
-        // Fetch all records from the target table
-        String selectAllSql = "SELECT * FROM " + targetSchema + "." + targetTable;
-        List<Map<String, Object>> targetRecords = jdbcTemplate.queryForList(selectAllSql);
+        Set<Map<String, Object>> targetPrimaryKeys = targetRecords.stream()
+                .map(record -> primaryKeys.stream().collect(Collectors.toMap(pk -> pk, record::get)))
+                .collect(Collectors.toSet());
 
-        for (Map<String, Object> targetRecord : targetRecords) {
-            Map<String, Object> primaryKeyMap = primaryKeys.stream()
-                    .collect(Collectors.toMap(pk -> pk, targetRecord::get));
+        targetPrimaryKeys.removeAll(processedPrimaryKeys);
 
-            if (!processedPrimaryKeys.contains(primaryKeyMap)) {
-                String deleteSql = "DELETE FROM " + targetSchema + "." + targetTable + " WHERE " +
-                        primaryKeys.stream().map(pk -> pk + " = ?").collect(Collectors.joining(" AND "));
+        if (!targetPrimaryKeys.isEmpty()) {
+            String deleteSql = "DELETE FROM " + targetSchema + "." + targetTable + " WHERE " +
+                    primaryKeys.stream().map(pk -> pk + " = ?").collect(Collectors.joining(" AND "));
 
-                jdbcTemplate.update(deleteSql, primaryKeys.stream().map(targetRecord::get).toArray());
-                log.info("Deleted record from {}.{} where {}", targetSchema, targetTable, primaryKeyMap);
-            }
+            jdbcTemplate.batchUpdate(deleteSql, targetPrimaryKeys.stream()
+                    .map(pkMap -> primaryKeys.stream().map(pkMap::get).toArray())
+                    .collect(Collectors.toList()));
+
+            log.info("Deleted {} records.", targetPrimaryKeys.size());
         }
     }
 }
