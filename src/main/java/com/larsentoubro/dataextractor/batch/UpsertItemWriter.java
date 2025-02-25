@@ -10,10 +10,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -57,13 +54,38 @@ public class UpsertItemWriter implements ItemWriter<Map<String, Object>> {
         String matchCondition = primaryKeys.stream().map(pk -> "t." + pk + " = s." + pk).collect(Collectors.joining(" AND "));
         String updateSetClause = nonPrimaryColumns.stream().map(col -> "t." + col + " = s." + col).collect(Collectors.joining(", "));
 
-        return  "SET IDENTITY_INSERT " + targetSchema + "." + targetTable + " ON;" +
-                "MERGE INTO " + fullTableName + " AS t " +
-                "USING (SELECT ? AS " + String.join(", ? AS ", columns) + ") AS s " +
-                "ON " + matchCondition + " " +
-                "WHEN MATCHED THEN UPDATE SET " + updateSetClause + " " +
-                "WHEN NOT MATCHED THEN INSERT (" + String.join(", ", columns) + ") VALUES (" +
-                columns.stream().map(c -> "s." + c).collect(Collectors.joining(", ")) + ");" +
+        return "SET IDENTITY_INSERT " + targetSchema + "." + targetTable + " ON; " +
+
+                // Step 1: Declare a table variable
+                "DECLARE @SourceData TABLE ( " +
+                columns.stream().map(col -> "[" + col + "] NVARCHAR(MAX)").collect(Collectors.joining(", ")) +
+                "); " +
+
+                // Step 2: Insert data into the table variable
+                "INSERT INTO @SourceData (" + columns.stream().map(col -> "[" + col + "]").collect(Collectors.joining(", ")) + ") " +
+                "VALUES " +
+                columns.stream().map(col -> "(" + columns.stream().map(c -> "?").collect(Collectors.joining(", ")) + ")").collect(Collectors.joining(", ")) + "; " +
+
+                // Step 3: Insert new records where no match exists
+                "INSERT INTO " + targetSchema + "." + targetTable +
+                " ( " + columns.stream().map(col -> "[" + col + "]").collect(Collectors.joining(", ")) + ", CreatedAt, LastModifiedAt ) " +
+                "SELECT " + columns.stream().map(col -> "s.[" + col + "]").collect(Collectors.joining(", ")) + ", GETDATE(), NULL " +
+                "FROM @SourceData s " +
+                "WHERE NOT EXISTS (" +
+                "   SELECT 1 FROM " + targetSchema + "." + targetTable + " t " +
+                "   WHERE " + matchCondition +
+                "); " +
+
+                // Step 4: Insert a new row instead of updating the matched record
+                "INSERT INTO " + targetSchema + "." + targetTable +
+                " ( " + columns.stream().map(col -> "[" + col + "]").collect(Collectors.joining(", ")) + ", CreatedAt, LastModifiedAt ) " +
+                "SELECT " + columns.stream().map(col -> "s.[" + col + "]").collect(Collectors.joining(", ")) + ", NULL, GETDATE() " +
+                "FROM @SourceData s " +
+                "WHERE EXISTS (" +
+                "   SELECT 1 FROM " + targetSchema + "." + targetTable + " t " +
+                "   WHERE " + matchCondition +
+                "); " +
+
                 "SET IDENTITY_INSERT " + targetSchema + "." + targetTable + " OFF;";
     }
 }
