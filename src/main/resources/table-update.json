@@ -21,5 +21,19 @@
         "targetTable": "BBS_AttendanceRound_bronze"
       }
     ]
+  },
+  {
+    "sourceDatabase": "Nearmiss",
+    "tablesForChanges": [
+      {
+        "sourceSchema": "dbo",
+        "sourceTable": "RSC_RSCTransaction",
+        "primaryKey": [
+          "ID"
+        ],
+        "targetSchema": "dbo",
+        "targetTable": "RSC_RSCTransaction_bronze"
+      }
+    ]
   }
 ]

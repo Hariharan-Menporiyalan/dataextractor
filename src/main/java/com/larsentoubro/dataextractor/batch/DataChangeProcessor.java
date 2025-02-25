@@ -18,14 +18,14 @@ import java.util.stream.Collectors;
 
 @Slf4j
 @Component
-@StepScope
+@StepScope  // Remove @StepScope from the processor
 public class DataChangeProcessor implements ItemProcessor<Map<String, Object>, Map<String, Object>> {
 
     private final JdbcTemplate jdbcTemplate;
     private final String targetSchema;
     private final String targetTable;
-    private final List<String> primaryKeys;
-    private Set<Map<String, Object>> targetRecords;
+    private final Set<String> primaryKeys; // Use a Set for primary keys
+    private Map<Map<String, Object>, Map<String, Object>> targetRecordsByPrimaryKey;
     private final Set<Map<String, Object>> processedPrimaryKeys = ConcurrentHashMap.newKeySet();
 
     @Autowired
@@ -36,21 +36,20 @@ public class DataChangeProcessor implements ItemProcessor<Map<String, Object>, M
         this.jdbcTemplate = jdbcTemplate;
         this.targetSchema = targetSchema;
         this.targetTable = targetTable;
-        this.primaryKeys = Arrays.asList(primaryKeysCsv.split(","));
+        this.primaryKeys = Set.of(primaryKeysCsv.split(",")); // Use Set.of for immutability
     }
 
     @PostConstruct
     public void loadTargetData() {
         String selectAllSql = "SELECT * FROM " + targetSchema + "." + targetTable;
         List<Map<String, Object>> records = jdbcTemplate.queryForList(selectAllSql);
-        log.info("Loaded target table data of size {} into memory...", records.size());
+        log.info("Loaded target table data of size {} into memory", records.size());
 
-        // Create a Map for fast lookups based on primary keys
-        targetRecords = new HashSet<>();
+        targetRecordsByPrimaryKey = new ConcurrentHashMap<>();
         for (Map<String, Object> record : records) {
             Map<String, Object> primaryKeyMap = primaryKeys.stream()
                     .collect(Collectors.toMap(pk -> pk, record::get));
-            targetRecords.add(primaryKeyMap);
+            targetRecordsByPrimaryKey.put(primaryKeyMap, record); // Key: Primary Key Map, Value: Full Record
         }
     }
 
@@ -63,9 +62,10 @@ public class DataChangeProcessor implements ItemProcessor<Map<String, Object>, M
 
         processedPrimaryKeys.add(primaryKeyMap);
 
-        if (targetRecords.contains(primaryKeyMap)) {
-            Map<String, Object> existingRecord = findRecord(primaryKeyMap);
-            if (existingRecord != null && hasChanges(existingRecord, item)) {
+        Map<String, Object> existingRecord = targetRecordsByPrimaryKey.get(primaryKeyMap);
+
+        if (existingRecord != null) {
+            if (hasChanges(existingRecord, item)) {
                 return item; // Update
             } else {
                 return null; // No changes
@@ -75,26 +75,27 @@ public class DataChangeProcessor implements ItemProcessor<Map<String, Object>, M
         }
     }
 
-    private Map<String, Object> findRecord(Map<String, Object> primaryKeyMap) {
-        return targetRecords.stream()
-                .filter(record -> primaryKeys.stream().allMatch(pk -> Objects.equals(record.get(pk), primaryKeyMap.get(pk))))
-                .findFirst()
-                .orElse(null);
-    }
-
     private boolean hasChanges(Map<String, Object> existingRecord, Map<String, Object> newRecord) {
-        return newRecord.entrySet().stream()
-                .filter(entry -> !primaryKeys.contains(entry.getKey()))
-                .anyMatch(entry -> !Objects.equals(entry.getValue(), existingRecord.get(entry.getKey())));
+        if (existingRecord == null) return true;
+
+        for (String key : newRecord.keySet()) {
+            if (!primaryKeys.contains(key)) {
+                Object newValue = newRecord.get(key);
+                Object existingValue = existingRecord.get(key);
+                if (!Objects.equals(newValue, existingValue)) {
+                    return true; // Change detected
+                }
+            }
+        }
+        return false; // No changes detected
     }
 
     @AfterStep
     public void cleanup(StepExecution stepExecution) {
+        log.info("Successfully captured change data from {}.{}", targetSchema, targetTable);
         log.info("Performing cleanup: Deletes...");
 
-        Set<Map<String, Object>> targetPrimaryKeys = targetRecords.stream()
-                .map(record -> primaryKeys.stream().collect(Collectors.toMap(pk -> pk, record::get)))
-                .collect(Collectors.toSet());
+        Set<Map<String, Object>> targetPrimaryKeys = targetRecordsByPrimaryKey.keySet();
 
         targetPrimaryKeys.removeAll(processedPrimaryKeys);
 
