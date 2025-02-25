@@ -10,6 +10,29 @@
         ],
         "targetSchema": "dbo",
         "targetTable": "IMS_NOI_bronze"
+      },
+      {
+        "sourceSchema": "dbo",
+        "sourceTable": "BBS_AttendanceRound",
+        "primaryKey": [
+          "BBSRoundNo"
+        ],
+        "targetSchema": "dbo",
+        "targetTable": "BBS_AttendanceRound_bronze"
+      }
+    ]
+  },
+  {
+    "sourceDatabase": "Nearmiss",
+    "tablesForChanges": [
+      {
+        "sourceSchema": "dbo",
+        "sourceTable": "RSC_RSCTransaction",
+        "primaryKey": [
+          "ID"
+        ],
+        "targetSchema": "dbo",
+        "targetTable": "RSC_RSCTransaction_bronze"
       }
     ]
   }
