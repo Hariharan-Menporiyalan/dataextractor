@@ -1,5 +1,6 @@
 package com.larsentoubro.dataextractor.batch;
 
+import jakarta.transaction.Transactional;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.batch.core.configuration.annotation.StepScope;
 import org.springframework.batch.item.Chunk;
@@ -35,56 +36,37 @@ public class UpsertItemWriter implements ItemWriter<Map<String, Object>> {
     }
 
     @Override
+    @Transactional
     public void write(Chunk<? extends Map<String, Object>> items) {
         if (items.isEmpty()) return;
 
         List<Map<String, Object>> batch = new ArrayList<>(items.getItems());
         String sql = buildMergeQuery(batch);
 
-        jdbcTemplate.batchUpdate(sql, batch.stream()
-                .map(item -> item.values().toArray())
-                .toList());
+        List<Object[]> batchParams = new ArrayList<>();
+        for (Map<String, Object> item : batch) {
+            Object[] params = item.values().toArray();
+            batchParams.add(params);
+        }
+
+        jdbcTemplate.batchUpdate(sql, batchParams);
     }
 
     private String buildMergeQuery(List<Map<String, Object>> batch) {
         String fullTableName = targetSchema + "." + targetTable;
         List<String> columns = new ArrayList<>(batch.get(0).keySet());
-        List<String> nonPrimaryColumns = columns.stream().filter(col -> !primaryKeys.contains(col)).toList();
-
-        String matchCondition = primaryKeys.stream().map(pk -> "t." + pk + " = s." + pk).collect(Collectors.joining(" AND "));
-        String updateSetClause = nonPrimaryColumns.stream().map(col -> "t." + col + " = s." + col).collect(Collectors.joining(", "));
 
         return "SET IDENTITY_INSERT " + targetSchema + "." + targetTable + " ON; " +
-
-                // Step 1: Declare a table variable
-                "DECLARE @SourceData TABLE ( " +
-                columns.stream().map(col -> "[" + col + "] NVARCHAR(MAX)").collect(Collectors.joining(", ")) +
-                "); " +
-
-                // Step 2: Insert data into the table variable
-                "INSERT INTO @SourceData (" + columns.stream().map(col -> "[" + col + "]").collect(Collectors.joining(", ")) + ") " +
-                "VALUES " +
-                columns.stream().map(col -> "(" + columns.stream().map(c -> "?").collect(Collectors.joining(", ")) + ")").collect(Collectors.joining(", ")) + "; " +
-
-                // Step 3: Insert new records where no match exists
-                "INSERT INTO " + targetSchema + "." + targetTable +
-                " ( " + columns.stream().map(col -> "[" + col + "]").collect(Collectors.joining(", ")) + ", CreatedAt, LastModifiedAt ) " +
-                "SELECT " + columns.stream().map(col -> "s.[" + col + "]").collect(Collectors.joining(", ")) + ", GETDATE(), NULL " +
-                "FROM @SourceData s " +
-                "WHERE NOT EXISTS (" +
-                "   SELECT 1 FROM " + targetSchema + "." + targetTable + " t " +
-                "   WHERE " + matchCondition +
-                "); " +
-
-                // Step 4: Insert a new row instead of updating the matched record
-                "INSERT INTO " + targetSchema + "." + targetTable +
-                " ( " + columns.stream().map(col -> "[" + col + "]").collect(Collectors.joining(", ")) + ", CreatedAt, LastModifiedAt ) " +
-                "SELECT " + columns.stream().map(col -> "s.[" + col + "]").collect(Collectors.joining(", ")) + ", NULL, GETDATE() " +
-                "FROM @SourceData s " +
-                "WHERE EXISTS (" +
-                "   SELECT 1 FROM " + targetSchema + "." + targetTable + " t " +
-                "   WHERE " + matchCondition +
-                "); " +
+                "MERGE INTO " + targetSchema + "." + targetTable + " AS t " +
+                "USING (SELECT ? AS " + String.join(", ? AS ", columns) + ") AS s " +
+                "ON " + primaryKeys.stream().map(pk -> "t.[" + pk + "] = s.[" + pk + "]").collect(Collectors.joining(" AND ")) + " " +
+                "WHEN MATCHED THEN " +
+                "UPDATE SET " +
+                columns.stream().filter(col -> !primaryKeys.contains(col)).map(col -> "t.[" + col + "] = s.[" + col + "]").collect(Collectors.joining(", ")) + ", " +
+                "t.LastModifiedAt = GETDATE() " +
+                "WHEN NOT MATCHED THEN " +
+                "INSERT (" + String.join(", ", columns) + ", CreatedAt, LastModifiedAt) " +
+                "VALUES (" + columns.stream().map(c -> "s.[" + c + "]").collect(Collectors.joining(", ")) + ", GETDATE(), NULL); " +
 
                 "SET IDENTITY_INSERT " + targetSchema + "." + targetTable + " OFF;";
     }
