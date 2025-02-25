@@ -69,7 +69,7 @@ public class DataExtractorService {
                 String targetDatabaseName = sourceDatabaseName + "_bronze";
 
                 //this is for test
-//                String targetDatabaseName = sourceDatabaseName;
+//                targetDatabaseName = sourceDatabaseName;
 
                 for (TableMapping tableMapping : tableConfig.getTablesForChanges()) {
                     String targetSchema = tableMapping.getTargetSchema();
