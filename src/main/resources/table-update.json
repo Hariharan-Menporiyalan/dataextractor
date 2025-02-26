@@ -13,6 +13,15 @@
       },
       {
         "sourceSchema": "dbo",
+        "sourceTable": "IMS_ActivityTimeOfIncident",
+        "primaryKey": [
+          "Id"
+        ],
+        "targetSchema": "dbo",
+        "targetTable": "IMS_ActivityTimeOfIncident_bronze"
+      },
+      {
+        "sourceSchema": "dbo",
         "sourceTable": "BBS_AttendanceRound",
         "primaryKey": [
           "BBSRoundNo"
