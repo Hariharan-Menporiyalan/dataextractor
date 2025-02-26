@@ -16,10 +16,12 @@ import org.springframework.context.ApplicationContext;
 import org.springframework.context.event.EventListener;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.jdbc.datasource.init.ResourceDatabasePopulator;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 import javax.sql.DataSource;
 import java.sql.Connection;
+import java.time.LocalDateTime;
 import java.util.List;
 
 @Service
@@ -69,7 +71,7 @@ public class DataExtractorService {
                 String targetDatabaseName = sourceDatabaseName + "_bronze";
 
                 //this is for test
-//                targetDatabaseName = sourceDatabaseName;
+                targetDatabaseName = sourceDatabaseName;
 
                 for (TableMapping tableMapping : tableConfig.getTablesForChanges()) {
                     String targetSchema = tableMapping.getTargetSchema();
@@ -111,9 +113,10 @@ public class DataExtractorService {
         }
     }
 
+//    @Scheduled(cron = "0 */2 * * * *")
     @EventListener(ApplicationReadyEvent.class)
     public void runJobOnSchedule() {
-        log.info("Running scheduled batch job...");
+        log.info("Running scheduled batch job at {}...", LocalDateTime.now().toLocalTime());
         runBatchJob();
     }
 }

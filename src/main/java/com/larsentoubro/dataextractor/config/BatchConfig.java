@@ -26,6 +26,7 @@ import org.springframework.context.annotation.Scope;
 import org.springframework.core.task.TaskExecutor;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
+import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.transaction.PlatformTransactionManager;
 
@@ -35,6 +36,7 @@ import java.util.List;
 import java.util.Map;
 
 @Configuration
+//@EnableScheduling
 public class BatchConfig {
 
     private final DataSource targetDataSource;
