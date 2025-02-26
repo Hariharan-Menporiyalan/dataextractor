@@ -100,10 +100,10 @@ public class DataExtractorService {
                             .addLong("time", System.currentTimeMillis())
                             .toJobParameters();
 
-                    log.info("Starting batch job for targetDatabase: {}, targetSchema: {}", targetDatabaseName, targetSchema);
+                    log.info("Starting batch job for targetDatabase: {}, targetSchema: {}, targetTable: {}", targetDatabaseName, targetSchema, tableMapping.getTargetTable());
 
                     JobExecution execution = jobLauncher.run(upsertJob, jobParameters);
-                    log.info("Job Status for targetDatabase: {}, targetSchema: {} -> {}", targetDatabaseName, targetSchema, execution.getStatus());
+                    log.info("Job Status for targetDatabase: {}, targetSchema: {}, targetTable: {} -> {}", targetDatabaseName, targetSchema, tableMapping.getTargetTable(), execution.getStatus());
                 }
             }
         } catch (Exception e) {

@@ -2,6 +2,7 @@ package com.larsentoubro.dataextractor.batch;
 
 import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.batch.core.BatchStatus;
 import org.springframework.batch.core.StepExecution;
 import org.springframework.batch.core.annotation.AfterStep;
 import org.springframework.batch.core.configuration.annotation.StepScope;
@@ -18,7 +19,7 @@ import java.util.stream.Collectors;
 
 @Slf4j
 @Component
-@StepScope  // Remove @StepScope from the processor
+@StepScope
 public class DataChangeProcessor implements ItemProcessor<Map<String, Object>, Map<String, Object>> {
 
     private final JdbcTemplate jdbcTemplate;
@@ -92,22 +93,24 @@ public class DataChangeProcessor implements ItemProcessor<Map<String, Object>, M
 
     @AfterStep
     public void cleanup(StepExecution stepExecution) {
-        log.info("Successfully captured change data from {}.{}", targetSchema, targetTable);
-        log.info("Performing cleanup: Deletes...");
+        if (stepExecution.getStatus().equals(BatchStatus.COMPLETED)) {
+            log.info("Successfully captured change data from {}.{}", targetSchema, targetTable);
+            log.info("Performing cleanup: Deletes...");
 
-        Set<Map<String, Object>> targetPrimaryKeys = targetRecordsByPrimaryKey.keySet();
+            Set<Map<String, Object>> targetPrimaryKeys = targetRecordsByPrimaryKey.keySet();
 
-        targetPrimaryKeys.removeAll(processedPrimaryKeys);
+            targetPrimaryKeys.removeAll(processedPrimaryKeys);
 
-        if (!targetPrimaryKeys.isEmpty()) {
-            String deleteSql = "DELETE FROM " + targetSchema + "." + targetTable + " WHERE " +
-                    primaryKeys.stream().map(pk -> pk + " = ?").collect(Collectors.joining(" AND "));
+            if (!targetPrimaryKeys.isEmpty()) {
+                String deleteSql = "DELETE FROM " + targetSchema + "." + targetTable + " WHERE " +
+                        primaryKeys.stream().map(pk -> pk + " = ?").collect(Collectors.joining(" AND "));
 
-            jdbcTemplate.batchUpdate(deleteSql, targetPrimaryKeys.stream()
-                    .map(pkMap -> primaryKeys.stream().map(pkMap::get).toArray())
-                    .collect(Collectors.toList()));
+                jdbcTemplate.batchUpdate(deleteSql, targetPrimaryKeys.stream()
+                        .map(pkMap -> primaryKeys.stream().map(pkMap::get).toArray())
+                        .collect(Collectors.toList()));
 
-            log.info("Deleted {} records.", targetPrimaryKeys.size());
+                log.info("Deleted {} records.", targetPrimaryKeys.size());
+            }
         }
     }
 }
