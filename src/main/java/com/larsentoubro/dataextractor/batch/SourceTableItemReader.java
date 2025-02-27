@@ -2,11 +2,9 @@ package com.larsentoubro.dataextractor.batch;
 
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.batch.core.configuration.annotation.StepScope;
-import org.springframework.batch.item.database.JdbcCursorItemReader;
 import org.springframework.batch.item.database.JdbcPagingItemReader;
 import org.springframework.batch.item.database.Order;
 import org.springframework.batch.item.database.support.SqlPagingQueryProviderFactoryBean;
-import org.springframework.batch.item.database.support.SqlServerPagingQueryProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
@@ -15,7 +13,6 @@ import org.springframework.stereotype.Component;
 
 import javax.sql.DataSource;
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -32,7 +29,8 @@ public class SourceTableItemReader extends JdbcPagingItemReader<Map<String, Obje
                                  @Qualifier("sourceDataSource") DataSource dataSource) {
 
         setDataSource(dataSource);
-        setPageSize(5000); // Optimized for large tables
+        setPageSize(5000);  // Optimized for large tables
+        setFetchSize(5000);
         setRowMapper(new ColumnMapRowMapper());
 
         List<String> primaryKeys = Arrays.asList(primaryKeysCsv.split(","));

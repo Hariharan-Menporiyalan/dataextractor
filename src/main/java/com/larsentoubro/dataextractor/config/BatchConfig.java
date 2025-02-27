@@ -26,13 +26,11 @@ import org.springframework.context.annotation.Scope;
 import org.springframework.core.task.TaskExecutor;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
-import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.transaction.PlatformTransactionManager;
 
 import javax.sql.DataSource;
 import java.io.IOException;
-import java.util.List;
 import java.util.Map;
 
 @Configuration
@@ -50,7 +48,7 @@ public class BatchConfig {
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
         executor.setCorePoolSize(4); // Number of parallel threads
         executor.setMaxPoolSize(8);
-        executor.setQueueCapacity(10);
+        executor.setQueueCapacity(10000);
         executor.initialize();
         return executor;
     }
