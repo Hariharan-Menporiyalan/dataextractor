@@ -38,6 +38,7 @@ public class DataChangeProcessor implements ItemProcessor<Map<String, Object>, M
     private final AtomicInteger offset = new AtomicInteger(0);
     private final AtomicBoolean hasMoreTargetRecords = new AtomicBoolean(true);
     private final ReentrantLock cacheLock = new ReentrantLock();
+    private boolean isTargetTableEmpty = false;
 
     @Autowired
     public DataChangeProcessor(
@@ -52,8 +53,16 @@ public class DataChangeProcessor implements ItemProcessor<Map<String, Object>, M
     }
 
     @BeforeStep
-    public void loadInitialTargetData() {
-        loadNextBatch();
+    public void checkTargetTableStatus() {
+        String countSql = "SELECT COUNT(1) FROM " + targetSchema + "." + targetTable;
+        Integer count = jdbcTemplate.queryForObject(countSql, Integer.class);
+        isTargetTableEmpty = (count == null || count == 0);
+
+        if (!isTargetTableEmpty) {
+            loadNextBatch();
+        } else {
+            log.info("Target table {}.{} is empty. All source records will be inserted.", targetSchema, targetTable);
+        }
     }
 
     @Override
@@ -61,6 +70,11 @@ public class DataChangeProcessor implements ItemProcessor<Map<String, Object>, M
         if (item == null || item.isEmpty()) {
             log.debug("Skipping null or empty item.");
             return null;
+        }
+
+        // If target table is empty, directly insert all records
+        if (isTargetTableEmpty) {
+            return item;
         }
 
         Map<String, Object> primaryKeyMap = getPrimaryKeyMap(item);
@@ -157,24 +171,26 @@ public class DataChangeProcessor implements ItemProcessor<Map<String, Object>, M
     @AfterStep
     public void cleanup(StepExecution stepExecution) {
         if (stepExecution.getStatus().equals(BatchStatus.COMPLETED)) {
-            log.info("Step completed. Performing cleanup: Deleting missing records from target...");
+            log.info("Successfully captured change data. Performing cleanup: Deleting missing records from target...");
 
-            Set<Map<String, Object>> targetPrimaryKeys = targetRecordCache.keySet();
-            if (!targetPrimaryKeys.isEmpty()) {
-                cacheLock.lock();
-                try {
-                    String deleteSql = "DELETE FROM " + targetSchema + "." + targetTable + " WHERE " +
-                            primaryKeys.stream().map(pk -> pk + " = ?").collect(Collectors.joining(" AND "));
-
-                    jdbcTemplate.batchUpdate(deleteSql, targetPrimaryKeys.stream()
-                            .map(pkMap -> primaryKeys.stream().map(pkMap::get).toArray())
-                            .collect(Collectors.toList()));
-
-                    log.info("Deleted {} records that were not found in source.", targetPrimaryKeys.size());
-                } finally {
-                    cacheLock.unlock();
-                }
-            }
+//            if (!isTargetTableEmpty) {
+//                Set<Map<String, Object>> targetPrimaryKeys = targetRecordCache.keySet();
+//                if (!targetPrimaryKeys.isEmpty()) {
+//                    cacheLock.lock();
+//                    try {
+//                        String deleteSql = "DELETE FROM " + targetSchema + "." + targetTable + " WHERE " +
+//                                primaryKeys.stream().map(pk -> pk + " = ?").collect(Collectors.joining(" AND "));
+//
+//                        jdbcTemplate.batchUpdate(deleteSql, targetPrimaryKeys.stream()
+//                                .map(pkMap -> primaryKeys.stream().map(pkMap::get).toArray())
+//                                .collect(Collectors.toList()));
+//
+//                        log.info("Deleted {} records that were not found in source.", targetPrimaryKeys.size());
+//                    } finally {
+//                        cacheLock.unlock();
+//                    }
+//                }
+//            }
         }
     }
 }
