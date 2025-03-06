@@ -22,6 +22,24 @@
       },
       {
         "sourceSchema": "dbo",
+        "sourceTable": "IMS_NatureOfInjury",
+        "primaryKey": [
+          "Id"
+        ],
+        "targetSchema": "dbo",
+        "targetTable": "IMS_NatureOfInjury_bronze"
+      },
+      {
+        "sourceSchema": "dbo",
+        "sourceTable": "IMS_ManhoursEntry",
+        "primaryKey": [
+          "ManhoursEntryId"
+        ],
+        "targetSchema": "dbo",
+        "targetTable": "IMS_ManhoursEntry_bronze"
+      },
+      {
+        "sourceSchema": "dbo",
         "sourceTable": "BBS_AttendanceRound",
         "primaryKey": [
           "BBSRoundNo"
@@ -32,8 +50,31 @@
     ]
   },
   {
+    "sourceDatabase": "lnapppddb",
+    "tablesForChanges": [
+      {
+        "sourceSchema": "dbo",
+        "sourceTable": "tltcom005175",
+        "primaryKey": [
+          "t_hdat"
+        ],
+        "targetSchema": "dbo",
+        "targetTable": "tltcom005175_bronze"
+      }
+    ]
+  },
+  {
     "sourceDatabase": "Nearmiss",
     "tablesForChanges": [
+      {
+        "sourceSchema": "dbo",
+        "sourceTable": "vw_RSC_Emp_Info",
+        "primaryKey": [
+          "t_psno"
+        ],
+        "targetSchema": "dbo",
+        "targetTable": "vw_RSC_Emp_Info_bronze"
+      },
       {
         "sourceSchema": "dbo",
         "sourceTable": "RSC_RSCTransaction",
